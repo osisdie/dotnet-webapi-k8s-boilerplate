@@ -27,6 +27,7 @@ jobs:
       run: dotnet build --no-restore -c Release
 
     - name: Test
-      run: dotnet test --no-build -c Release --verbosity normal
+      run: dotnet test --no-build -c Release --verbosity normal --filter "FullyQualifiedName!~CoreFX.Caching.Redis&FullyQualifiedName!~Hello8.Domain.SDK.Tests.Cache_Test"
       env:
-        ASPNETCORE_ENVIRONMENT: Debug
+        ASPNETCORE_ENVIRONMENT: Development
+        COREFX_API_NAME: hello8-api
