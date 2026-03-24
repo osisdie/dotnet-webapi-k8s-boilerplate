@@ -1,476 +1,219 @@
-## Prerequisite
-- [Download .NET 8.0](https://dotnet.microsoft.com/download/dotnet/8.0)
-  - And the latest Visual Studio / VS Code
-- [Setup minikube](https://minikube.sigs.k8s.io/docs/start/)
-  - Skip if you have you own k8s environment
-- [nginx for Windows](https://nginx.org/en/docs/windows.html)
-  - Skip if you don't need reverse proxy server
-- [memurai-Redis for Windows alternative In-Memory Datastore](https://www.memurai.com/)
-  - Skip if you have your own Redis server
+# dotnet-webapi-k8s-boilerplate
 
-## Features
+[![.NET](https://github.com/osisdie/dotnet-webapi-k8s-boilerplate/actions/workflows/dotnet.yml/badge.svg)](https://github.com/osisdie/dotnet-webapi-k8s-boilerplate/actions/workflows/dotnet.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](Dockerfile)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-minikube-blue)](minikube/)
+
+> Production-ready .NET WebAPI framework with structured responses, request/response logging middleware, Redis caching (circuit-breaker), and Kubernetes deployment — supporting both .NET 8 and .NET 10. Clone and ship.
+
 ---
-- Use NET Standard 2.1 for library projects
-- Use NET 8.0 for Web Applications (Migrated from NET 5.0)
-- Use Built-In Microsoft ConfigurationBuilder to config (appsettings.json, hellosettings.json)
-- Use Secret Storage to protect sensitive configs
-- Use Log4net Logging on console, file and AWS CloudWatch on demand
-- Use Middleware for logging Request/Response
-- Use Built-In Microsoft DI to inject most service classes
-- Use Data Annotations to validate Request data format
-- Follow HTTP Status Code for 2xx, 3xx, 4xx
-- Async for HTTP and Database communications
-- CamelCase property format
-- Use Built-In Microsoft IDistributedCache for Redis Cache (Cache for Database)
-- Use Built-In Microsoft ILogger for Log4net Adapter
-- Use Built-In Microsoft OpenAPI for Swagger UI (v1 and v2)
-- Use Built-In HealthCheck (~/health)
-- Use **.editorconfig** to align coding style
-- Switch deployment environment by runtime system environment variable
-  - ASPNETCORE_ENVIRONMENT: **Debug**
-  - ASPNETCORE_ENVIRONMENT: **Development**
-  - ASPNETCORE_ENVIRONMENT: **Production**
-- Use xUnit UnitTest Projects
 
+## What's Inside
+
+This repo contains two layers:
+
+### CoreFX Framework (Reusable Library)
+
+A production-grade .NET framework designed to be reused across multiple WebAPI projects. All CoreFX libraries **multi-target net8.0 and net10.0**.
+
+| Module | What it does |
+|--------|-------------|
+| **CoreFX.Abstractions** | `SvcResponse<T>` structured response pattern, `FxObject` base class with auto-logging, `LazySingleton<T>`, `SdkRuntime` configuration, `DefaultJsonSerializer`, failback/circuit-breaker scoring, network utilities |
+| **CoreFX.Common** | `SvcContext` initialization, string extensions (masking, hashing, parsing), file utilities, environment detection (`IsDevelopment()`, `IsProduction()`, etc.) |
+| **CoreFX.Hosting** | Request/response logging middleware with correlation IDs, uses `RecyclableMemoryStream` for efficiency |
+| **CoreFX.Logging.Log4net** | `ILogger` adapter for log4net — bridges `Microsoft.Extensions.Logging` to log4net seamlessly |
+| **CoreFX.Caching.Redis** | `IDistributedCache` extensions with typed get/set (`GetAsync<T>`), circuit-breaker pattern via `FailbackScore`, auto-reconnect |
+
+### Hello8 Sample App (Reference Implementation)
+
+A demo WebAPI that showcases CoreFX in action:
+- API versioning (v1/v2) with Swagger UI
+- Health check endpoints (app, database, cache)
+- Environment-based configuration (Debug/Development/Production)
+- Docker multi-stage build + Minikube K8s deployment
+- xUnit integration and unit tests
+
+---
+
+## Quick Start
+
+### Prerequisites
+- [.NET 8.0](https://dotnet.microsoft.com/download/dotnet/8.0) or [.NET 10.0](https://dotnet.microsoft.com/download/dotnet/10.0) SDK
+- [Docker](https://www.docker.com/get-started) (optional)
+- [minikube](https://minikube.sigs.k8s.io/docs/start/) (optional, for K8s deployment)
+
+### Run locally (30 seconds)
+```bash
+cd src/Endpoint/Hello8
+dotnet run
+# Open http://localhost:5000/swagger
+```
+
+### Run with Docker Compose (1 minute)
+```bash
+docker-compose up
+# App at http://localhost:8080/swagger, Redis at localhost:16379
+```
+
+### Deploy to Minikube (5 minutes)
+```bash
+# Build image
+export VERSION=$(cat src/Endpoint/Hello8/.version | head -n1)
+docker build . -t hello8-api:$VERSION -f Dockerfile
+
+# Deploy
+envsubst < minikube/deployment.yaml | kubectl apply -f -
+kubectl apply -f minikube/service.yaml
+minikube service hello8-api-dev-svc --url
+```
+
+---
+
+## Architecture
+
+```
++---------------------------------------------------------+
+|  Hello8.Domain.Endpoint (net10.0)                       |
+|  ASP.NET Core WebAPI + Swagger + HealthChecks           |
++---------------------------------------------------------+
+        |               |                |
++-------v------+ +-----v-------+ +------v--------+
+| Hello8.SDK   | | Hello8.DB   | | Hello8.Common |
+| (net8/10)    | | Dapper+SQL  | | Domain models |
++--------------+ +-------------+ +---------------+
+        |               |                |
++---------------------------------------------------------+
+|  CoreFX Framework (net8.0 + net10.0)                    |
+|  Abstractions | Common | Hosting | Log4net | Redis      |
++---------------------------------------------------------+
+        |
++---------------------------------------------------------+
+|  Infrastructure                                         |
+|  Docker | Minikube K8s | Azure Pipelines | GitHub CI    |
++---------------------------------------------------------+
+```
+
+---
+
+## CoreFX Features
+
+### Structured Response Pattern
+Every API response uses `SvcResponse<T>` for consistency:
+```json
+{
+  "data": { ... },
+  "code": 1,
+  "msg": "Success",
+  "msgId": "uuid",
+  "isSuccess": true,
+  "subCode": "",
+  "subMsg": "",
+  "extMap": {}
+}
+```
+Fluent API: `response.SetData(obj).Success()` or `response.SetMsg("error").Error()`
+
+### Request/Response Logging Middleware
+```csharp
+app.UseRequestResponseLogging(); // one line in Startup.cs
+```
+Logs every request/response with method, path, body, headers, correlation ID, and timing.
+
+### Redis Caching with Circuit-Breaker
+```csharp
+var result = await cache.GetAsync<MyDto>("key");   // typed deserialization
+await cache.SetAsync("key", myObj, TimeSpan.FromMinutes(5));
+```
+Built-in `FailbackScore` pattern: after N consecutive failures, cache is marked unavailable and auto-retries on a decay schedule.
+
+### Multi-Framework Targeting
+All library projects compile for both `net8.0` and `net10.0` with TFM-conditional NuGet packages, ensuring compatibility across .NET versions.
+
+---
 
 ## Projects
----
-**Hello8.Domain.Endpoint** is the primary project wraps all the other dependent projects, such as
-- CoreFX: Including abstraction design, common utilites
+
+**Hello8.Domain.Endpoint** is the primary project wrapping all dependent projects:
+
+- **CoreFX** (Framework)
   - CoreFX.Abstractions
   - CoreFX.Common
   - CoreFX.Hosting
   - CoreFX.Logging.Log4net
   - CoreFX.Caching.Redis
 
-- Hello8: Including domain-driven design, services
+- **Hello8** (Domain)
   - Hello8.Domain.Common
   - Hello8.Domain.Contract
   - Hello8.Domain.DataAccess.Database
   - Hello8.Domain.SDK
 
 ## Versioning
-Whenever any feature, bugfix or necessary to rebuild a new image, make sure you or your builder modify **.version** and **ChangeLog.md** files.
 - Version File: `./src/Endpoint/Hello8/.version`
-- Version Format: `#.#.#-###`
-  - [major version].[minor version].[build version]  (e.g.: `1.0.1`)
-  - Adding AZ pipeline's build-id in the suffix (e.g.: `1.0.1-100`)
+- Version Format: `#.#.#-###` (e.g., `3.0.0-100`)
+- CHANGELOG: `./CHANGELOG.md`
+- Git Tags: `hello8-api/v3.0.0-100`
 
-- ChangeLog File: `./ChangeLog.md`
-- ChangeLog Format: Markdown with date and version number, such as
-  ```markdown
-  ### 2024-09-09
-  * ** Hello8.Domain.Endpoint (2.0.1)
-    * Upgrade to .NET 8.0 from .NET 5.0
-  ### 2020-11-30
-  * ** Hello8.Domain.Contract (1.0.1)
-    * Created
-  ### 2020-11-29
-  * ** Hello8.Domain.Endpoint (1.0.0)
-    * Created
-  ```
+---
 
-- Git Version Tags: `hello8-api/v1.0.1-100`
+## Testing
 
-
-## UnitTesting
-
-### End to end integration Test
-- Necessary Environment Variables
-  - **ASPNETCORE_ENVIRONMENT**: ex: `Development`
-  - **CI_TEST_ENDPOINT**: ex: `http://+:18731`
-
-- Expect test results
-  - Passed!
-  - Duration: less then 5s
-
+### Integration Test
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:CI_TEST_ENDPOINT = 'http://+:18731'
 
 dotnet test tests/IntegrationTest/Hello8/IntegrationTest.Hello8.csproj -c Release --filter FullyQualifiedName=IntegrationTest.Hello8.CI_Test.Integration_Test
-
-#  Determining projects to restore...
-#  Restored .\net8-webapi-hello8\tests\IntegrationTest\Hello8\IntegrationTest.Hello8.csproj (in 475 ms).
-#  5 of 6 projects are up-to-date for restore.
-#  CoreFX.Abstractions -> .\net8-webapi-hello8\src\Library\CoreFX\Abstractions\bin\Release\netstandard2.1\CoreFX.Abstractions.dll
-#  CoreFX.Common -> .\net8-webapi-hello8\src\Library\CoreFX\Common\bin\Release\netstandard2.1\CoreFX.Common.dll
-#  Hello8.Domain.Common -> .\net8-webapi-hello8\src\Library\Hello8\Common\bin\Release\netstandard2.1\Hello8.Domain.Common.dll
-#  Hello8.Domain.Contract -> .\net8-webapi-hello8\src\Endpoint\Contracts\Hello8\bin\Release\netstandard2.1\Hello8.Domain.Contract.dll
-#  TestAbstractions -> .\net8-webapi-hello8\tests\TestAbstractions\bin\Release\net8.0\TestAbstractions.dll
-#  IntegrationTest.Hello8 -> .\net8-webapi-hello8\tests\IntegrationTest\Hello8\bin\Release\net8\IntegrationTest.Hello8.dll
-
-# Test run for .\net8-webapi-hello8\tests\IntegrationTest\Hello8\bin\Release\net8\IntegrationTest.Hello8.dll (.NETCoreApp,Version=v8.0)
-# Microsoft (R) Test Execution Command Line Tool Version 16.8.0
-# Copyright (c) Microsoft Corporation.  All rights reserved.
-
-Starting test execution, please wait...
-A total of 1 test files matched the specified pattern.
-
-Passed!  - Failed:     0, Passed:     1, Skipped:     0, Total:     1, Duration: 874 ms - IntegrationTest.Hello8.dll (net8.0)
+# Passed! Duration: less than 5s
 ```
 
-### UnitTest
-
-- Necessary Environment Variables
-  - **ASPNETCORE_ENVIRONMENT**: ex: `Debug`
-  - **HELLO_REDIS_CACHE_CONN**: ex: `127.0.0.1:6379`
-- Expect test results
-  - Passed!
-  - Duration: less then 1m
-
+### Unit Test (Redis)
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = 'Debug'
-$env:HELLO_HELLODB_CONN = 'Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=HelloDB;user id=demouser;password=demopwd;Connection Timeout=5'
 $env:HELLO_REDIS_CACHE_CONN = '127.0.0.1:6379'
 
-dotnet test tests/UnitTest/CoreFX/Caching/Redis/UnitTest.CoreFX.Caching.Redis.csproj -c Release --filter FullyQualifiedName=UnitTest.CoreFX.Caching.Redis.Tests.Cache_Test.Integration_Test
-
-#  Determining projects to restore...
-#  All projects are up-to-date for restore.
-#  CoreFX.Abstractions -> .\net8-webapi-hello8\src\Library\CoreFX\Abstractions\bin\Release\netstandard2.1\CoreFX.Abstractions.dll
-#  CoreFX.Common -> .\net8-webapi-hello8\src\Library\CoreFX\Common\bin\Release\netstandard2.1\CoreFX.Common.dll
-#  TestAbstractions -> .\net8-webapi-hello8\tests\TestAbstractions\bin\Release\net8.0\TestAbstractions.dll
-#  CoreFX.Caching.Redis -> .\net8-webapi-hello8\src\Library\CoreFX\Caching\Redis\bin\Release\netstandard2.1\CoreFX.Caching.Redis.dll
-#  UnitTest.CoreFX.Caching.Redis -> .\net8-webapi-hello8\tests\UnitTest\CoreFX\Caching\Redis\bin\Release\net8.0\UnitTest.CoreFX.Caching.Redis.dll
-# Test run for .\net8-webapi-hello8\tests\UnitTest\CoreFX\Caching\Redis\bin\Release\net8.0\UnitTest.CoreFX.Caching.Redis.dll (.NETCoreApp,Version=v5.0)
-# Microsoft (R) Test Execution Command Line Tool Version 16.8.0
-# Copyright (c) Microsoft Corporation.  All rights reserved.
-
-Starting test execution, please wait...
-A total of 1 test files matched the specified pattern.
-
-Passed!  - Failed:     0, Passed:     1, Skipped:     0, Total:     1, Duration: 40 s - UnitTest.CoreFX.Caching.Redis.dll (net8.0)
+dotnet test tests/UnitTest/CoreFX/Caching/Redis/UnitTest.CoreFX.Caching.Redis.csproj -c Release
+# Passed! Duration: less than 1m
 ```
 
-K8s/Minikube
 ---
 
-### Build docker image
+## K8s/Minikube Deployment
 
-#### Review `Dockerfile`
-
+### Docker Build
 ```dockerfile
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-WORKDIR /app
-EXPOSE 80
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /build
-COPY . .
-RUN bash -c 'cat nuget.xml > ./nuget.config'
-
-# --------------------------
-# COPY Dependency Files
-# --------------------------
-COPY data/ src/Endpoint/Hello8/App_Data/
-
-# --------------------------
-# Build & Publish
-# --------------------------
-RUN dotnet restore "src/Endpoint/Hello8/Hello8.Domain.Endpoint.csproj" --configfile ./nuget.config
-RUN dotnet publish "src/Endpoint/Hello8/Hello8.Domain.Endpoint.csproj" -c Release -o /app --no-restore
-
-FROM base AS final
-WORKDIR /app
-COPY --from=build /app .
-ENTRYPOINT ["dotnet", "Hello8.Domain.Endpoint.dll"]
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# Multi-stage build: restore -> publish -> final
 ```
 
+### Kubernetes Manifests
+- `minikube/deployment.yaml` — 2 replicas, rolling update
+- `minikube/service.yaml` — ClusterIP service
+- `minikube/ingress.yaml` — Ingress configuration
 
-#### Run `dockerbuild.sh`
+### Environment Variables
+| Variable | Example | Required |
+|----------|---------|----------|
+| `ASPNETCORE_ENVIRONMENT` | `Development` | Yes |
+| `IMAGE_HOST` | `docker.io/[ACCOUNT-ID]` | For deploy |
+| `HELLO_HELLODB_CONN` | `Data Source=...` | For DB |
+| `HELLO_REDIS_CACHE_CONN` | `127.0.0.1:6379` | For cache |
+
+---
+
+## Health Checks
 
 ```bash
-export VERSION=$(cat src/Endpoint/Hello8/.version | head -n1)
-#   Your docker image's version, ex:
-#   - default: the content in the file of ./src/Endpoint/Hello8/.version
-#   - or any specific such as 1.0.1
+BASE_URL=http://localhost:5000
 
-export IMAGE_HOST=docker.io/[ACCOUNT-ID]
-#   Your Container Registry, ex:
-#   - docker.io: docker.io/[ACCOUNT-ID]
-#   - or AWS format: [ACCOUNT-ID].dkr.ecr.[REGION].amazonaws.com
-#   - or GCP format: gcr.io/[PROJECT-ID]
-
-# bash ./dockerbuild.sh
-#================================================================
-# Variables
-#================================================================
-REPO_NAME=hello8-api
-VERSION=${VERSION:-2.0.0}
-IMAGE_HOST_WITH_TAG=${IMAGE_HOST}/${REPO_NAME}:${VERSION}
-
-#================================================================
-# docker commands
-#================================================================
-docker build . -t $IMAGE_HOST_WITH_TAG -f Dockerfile
-# [+] Building 25.3s (17/17) FINISHED
-# => => naming to docker.io/[ACCOUNT-ID]/hello8-api:2.0.1
-
-docker push $IMAGE_HOST_WITH_TAG
-```
-
-
-### Minikube deployment  (For Example)
-
-#### Review `deployment.yaml`
-
-- Version: `1.0.1`
-- Replicas: `2`
-- Necessary environment variables
-  - **IMAGE_HOST**: ex `docker.io/[ACCOUNT-ID]`
-  - **HELLO_HELLODB_CONN**: ex `Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=HelloDB;user id=demouser;password=demopwd;Connection Timeout=5`
-  - **HELLO_REDIS_CACHE_CONN**: ex `127.0.0.1:6379`
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hello8-api-dev
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: hello8-api-dev
-  template:
-    metadata:
-      labels:
-        app: hello8-api-dev
-    spec:
-      containers:
-      - name: hello8-api-dev
-        image: ${IMAGE_HOST}/hello8-api:2.0.1
-        ports:
-        - containerPort: 80
-        env:
-        - name: ASPNETCORE_URLS
-          value: http://+:80
-        - name: ASPNETCORE_ENVIRONMENT
-          value: Development
-        - name: COREFX_DEPLOY_NAME
-          value: hello8-api-dev
-        - name: COREFX_API_NAME
-          value: hello8-api-dev
-        - name: HELLO_HELLODB_CONN
-          value: ${HELLO_HELLODB_CONN}
-        - name: HELLO_REDIS_CACHE_CONN
-          value: ${HELLO_REDIS_CACHE_CONN}
-```
-
-
-#### Review `service.yaml`
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: hello8-api-dev-svc
-  labels:
-    app: hello8-api-dev-svc
-spec:
-  ports:
-  - port: 80
-    targetPort: 80
-    protocol: TCP
-    name: http
-  selector:
-    app: hello8-api-dev
-```
-
-
-#### Run `minikube.sh`
-
-```bash
-export VERSION=$(cat src/Endpoint/Hello8/.version | head -n1)
-#   Your docker image's version, ex:
-#   - default: the content in the file of ./src/Endpoint/Hello8/.version
-#   - or any specific such as 1.0.1
-
-export KUBE_DEPLOY_FILE='minikube/deployment.yaml'
-#   Your deployment yaml file, ex:
-#   - local folder/path
-#   - or git repo/folder/path
-#   - or azure devops artifacts/folder/path
-
-# bash ./minikube/minikube.sh
-#================================================================
-# Variables
-#================================================================
-REPO_NAME=hello8
-KUBE_DEPLOY_FILE='minikube/deployment.yaml'
-IMAGE_TAG_REGEX='[0-9]\+.[0-9]\+.[0-9]\+[.-]\(build\)\?[0-9]\+'
-
-#================================================================
-# Update deployment version
-#================================================================
-sed -i "s/\/${REPO_NAME}:${IMAGE_TAG_REGEX}/\/${REPO_NAME}:${VERSION}/" ${KUBE_DEPLOY_FILE}
-
-#================================================================
-# Start deployment
-#================================================================
-envsubst < minikube/deployment.yaml | kubectl apply -f -
-# deployment.apps/hello8-api-dev created
-
-kubectl apply -f minikube/service.yaml -
-# service/hello8-api-dev-svc created
-
-#================================================================
-# Expose endpoint
-#================================================================
-minikube service hello8-api-dev-svc --url
-# service default/hello8-api-dev-svc has no node port
-# 🏃  Starting tunnel for service hello8-api-dev-svc.
-# |-----------|------------|-------------|------------------------|
-# | NAMESPACE |    NAME    | TARGET PORT |          URL           |
-# |-----------|------------|-------------|------------------------|
-# | default   | hello8-svc |             | http://127.0.0.1:38311 |
-# |-----------|------------|-------------|------------------------|
-# http://127.0.0.1:38311
-# ❗  Because you are using a Docker driver on linux, the terminal needs to be open to run it.
-# ✋  Stopping tunnel for service hello8-api-svc.
-# 
-# ❌  Exiting due to SVC_TUNNEL_STOP: stopping ssh tunnel: os: process already finished
-# 
-# 😿  If the above advice does not help, please let us know:
-# 👉  https://github.com/kubernetes/minikube/issues/new/choose
-
-#================================================================
-# Expose endpoint
-#================================================================
-curl http://127.0.0.1:38311/health
-# Healthy
-```
-
-
-## HealthChecks
-
-### Set testing base url
-
-```bash
-# You can get exposed hello8-api-dev-svc base url by the above command such as
-# minikube service hello8-api-dev-svc --url
-BASE_URL=http://+:38311
-```
-
-
-### Is accessable ?
-
-```bash
-curl ${BASE_URL}/health
-# Healthy
-```
-
-
-### Check service's version
-
-```bash
-curl ${BASE_URL}/api/echo/ver
-# or curl ${BASE_URL}/api/echo/version
-
-# Expect HTTP 200 application/json response
-# {"data":"2.0.1","code":1,"msg":"Success","msgId":"abc788a5-298d-45f1-b757-4ab7a413e6e8","isSuccess":true,"subCode":"","subMsg":"","extMap":{}}
-
-curl ${BASE_URL}/api/echo/ver | jq '.data'
-# Expect result: "2.0.1"
-```
-
-
-### Check config exists
-
-```bash
-curl ${BASE_URL}/api/echo/config
-# Expect HTTP 200 application/json response
-# {"data":{"appSettingConfig":true,"helloSettingConfig":false,"logConfig":true},"code":0,"msg":"Error","msgId":"247d492e-0861-471c-8c35-c4a48432e65d","isSuccess":false,"subCode":"","subMsg":"","extMap":{}}
-
-curl ${BASE_URL}/api/echo/config | jq '.data'
-# Expect result:
-# {
-#   "appSettingConfig": true,
-#   "helloSettingConfig": true,
-#   "logConfig": true
-# }
-```
-
-
-### Check database's connection
-
-- Unhealthy
-  - Check your environment variable **HELLO_HELLODB_CONN** before deployment
-
-```bash
-curl ${BASE_URL}/api/echo/db
-# Expect HTTP 503 application/json response
-# {"code":0,"msg":"The ConnectionString property has not been initialized.","msgId":"2b9575aa-82de-449d-92e7-6568ccb02355","isSuccess":false,"subCode":"","subMsg":"","extMap":{}}
-
-curl ${BASE_URL}/api/echo/db | jq '.isSuccess'
-# false
-```
-
-
-- Healthy
-  - Check your environment variable **HELLO_HELLODB_CONN** before deployment
-
-```bash
-curl ${BASE_URL}/api/echo/db
-# Expect HTTP 200 application/json response
-# {"data":"Microsoft SQL Server 2019 (RTM) - 15.0.2000.5 (X64) \n\tSep 24 2019 13:48:23 \n\tCopyright (C) 2019 Microsoft Corporation\n\tExpress Edition (64-bit) on Windows 10 Pro 10.0 <X64> (Build 19041: ) (Hypervisor)\n","code":1,"msg":"Success","msgId":"6851f5e2-60f0-45e6-b6d3-83f276439587","isSuccess":true,"subCode":"","subMsg":"","extMap":{}}
-
-curl ${BASE_URL}/api/echo/db | jq '.isSuccess'
-# true
-```
-
-
-### Check cache's connection
-
-- Unhealthy
-
-  - Check your environment variable **HELLO_REDIS_CACHE_CONN** before deployment
-
-  - Or force stop your cache service `services > memurai > stop`
-    > memurai-cli
-    > Could not connect to Memurai at 127.0.0.1:6379: Unknown error (10061)
-    > not connected>
-
-```bash
-curl ${BASE_URL}/api/echo/cache
-# Expect HTTP 503 application/json response
-# {"code":0,"msg":"It was not possible to connect to the redis server(s). UnableToConnect on 127.0.0.1:6379/Interactive, Initializing/NotStarted, last: NONE, origin: BeginConnectAsync, outstanding: 0, last-read: 2s ago, last-write: 2s ago, keep-alive: 60s, state: Connecting, mgr: 10 of 10 available, last-heartbeat: never, global: 7s ago, v: 2.0.593.37019","msgId":"4431e3c4-8685-449f-991e-45ff05e2e567","isSuccess":false,"subCode":"","subMsg":"","extMap":{}}
-
-curl ${BASE_URL}/api/echo/cache | jq '.isSuccess'
-# false
-```
-
-
-- Healthy
-  - Check your environment variable **HELLO_REDIS_CACHE_CONN** before deployment
-
-```bash
-curl ${BASE_URL}/api/echo/cache
-# Expect HTTP 200 application/json response
-# {"data":"hello8-api-debug-Hello8.Domain.Endpoint.Controllers.EchoController__172.18.128.1","code":1,"msg":"Success","msgId":"cb5544c7-069c-4925-bd48-3956ea823dc9","isSuccess":true,"subCode":"","subMsg":"","extMap":{}}
-
-curl ${BASE_URL}/api/echo/cache | jq '.isSuccess'
-# true
-```
-
-
-### System information dump
-
-```bash
-curl ${BASE_URL}/api/echo/dump
-# Expect HTTP 200 application/json response
-# 200 {"code":1,"msg":"Success","msgId":"80b1b009-1e42-46c9-92c4-5e232e2938f0","isSuccess":true,"subCode":"","subMsg":"","extMap":{"ver":"2.0.1","api-name":"hello8-api-debug","deploy":"hello8-api-debug","env":"Debug","_ip":"172.18.128.1","_host":"RDKEVINWU","_os":"Win32NT","_ts":"2020-11-30T05:06:32","_up":"2020-11-30T04:21:17"}}
-
-curl ${BASE_URL}/api/echo/dump | jq '.extMap'
-# {
-#   "ver": "2.0.1",
-#   "api-name": "hello8-api-debug",
-#   "deploy": "hello8-api-debug",
-#   "env": "Development",
-#   "_ip": "172.17.0.2",
-#   "_host": "hello8-6c7d69c76-4wxjr",
-#   "_os": "Unix",
-#   "_ts": "2020-11-30T09:14:59",
-#   "_up": "2020-11-30T07:02:09"
-# }
+curl $BASE_URL/health                    # Healthy
+curl $BASE_URL/api/echo/ver | jq '.data' # "3.0.0"
+curl $BASE_URL/api/echo/config           # Config status
+curl $BASE_URL/api/echo/db              # Database connectivity
+curl $BASE_URL/api/echo/cache           # Redis connectivity
+curl $BASE_URL/api/echo/dump            # System info (version, env, IP, uptime)
 ```

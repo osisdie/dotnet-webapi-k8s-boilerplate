@@ -47,7 +47,7 @@ variables:
   - name: VAR_BUILD_CONFIGURATION
     value: 'Release'
   - name: VAR_TEST_PROJECTS
-    value: 'hello8-api-all-projects.sln'
+    value: 'dotnet-webapi-k8s-boilerplate.sln'
   - name: VAR_DOCKER_REPO_NAME
     value: hello8-api
     readonly: true
@@ -76,7 +76,7 @@ steps:
     displayName: Install .NET SDK
     inputs:
       packageType: 'sdk'
-      version: '8.x'
+      version: '10.x'
       includePreviewVersions: true
 
   #- task: NuGetAuthenticate@0

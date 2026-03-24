@@ -53,6 +53,10 @@ namespace Hello8.Domain.Endpoint
             // Hello8 DI
             services.AddSingleton<IEchoRepository, EchoRepository>();
 
+            // API Versioning
+            services.AddApiVersioning()
+                .AddApiExplorer();
+
             // MVC
             services.AddHealthChecks();
             services.AddControllers()

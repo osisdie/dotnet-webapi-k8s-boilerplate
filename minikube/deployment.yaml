@@ -21,7 +21,7 @@ spec:
       - name: regcred  # Add creds to specify the private docker registery if needed
       containers:
       - name: hello8-api
-        image: ${IMAGE_HOST}/hello8-api:2.0.1
+        image: ${IMAGE_HOST}/hello8-api:3.0.0
         ports:
         - containerPort: 80 # 8080
         env:

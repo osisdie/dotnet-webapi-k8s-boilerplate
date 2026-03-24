@@ -1,5 +1,5 @@
 # Use the official Microsoft .NET SDK image to build the app
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /app
 EXPOSE 8080
 
@@ -14,7 +14,7 @@ RUN dotnet restore "src/Endpoint/Hello8/Hello8.Domain.Endpoint.csproj"
 RUN dotnet publish "src/Endpoint/Hello8/Hello8.Domain.Endpoint.csproj" -c Debug -o /app --no-restore
 
 # Use the ASP.NET Core runtime image to run the app
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 WORKDIR /app
 COPY --from=build /app .

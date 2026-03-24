@@ -5,6 +5,7 @@ using CoreFX.Abstractions.Contracts.Extensions;
 using Hello8.Domain.Contract.Models.Echo;
 using Hello8.Domain.Contract.Models.Extensions;
 using Hello8.Domain.Endpoint.Controllers.Bases;
+using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Hello8.Domain.Endpoint.Controllers
